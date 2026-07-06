@@ -40,7 +40,7 @@ def get_settings() -> Settings:
         SMTP_PORT=int(s.get("SMTP_PORT", 587)),
         SMTP_USER=s.get("SMTP_USER", ""),
         SMTP_APP_PASSWORD=s.get("SMTP_APP_PASSWORD", ""),
-        ADMIN_EMAIL=s.get("ADMIN_EMAIL", ""),
+        ADMIN_EMAIL=s.get("ADMIN_EMAIL", "saha.r@balmerlawrie.com"),
         APP_VERSION=s.get("APP_VERSION", "4.3.0"),
     )
 
@@ -299,7 +299,7 @@ def notify_admin(action_type: str, table_name: str, target_id: str, details: dic
     actor_name = st.session_state.get("employee_name", "Unknown User")
     actor_id = st.session_state.get("employee_id", "Unknown ID")
     actor_email = st.session_state.get("email", "")
-    admin_email = settings.ADMIN_EMAIL or "saha.r@balmerlawrie.com"
+    admin_email = "saha.r@balmerlawrie.com"
     subject = "BL Indirect Tax Updates"
 
     detail_rows = ""
