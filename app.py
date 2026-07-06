@@ -548,9 +548,6 @@ def can_delete_document(doc_row: dict) -> bool:
         return True
     return str(doc_row.get("uploaded_by")) == str(st.session_state.get("employee_id"))
 
-        return True
-    return str(doc_row.get("uploaded_by")) == str(st.session_state.get("employee_id"))
-
 
 # ---------------------------------------------------------
 # EMPLOYEE MASTER HELPERS (NEW)
