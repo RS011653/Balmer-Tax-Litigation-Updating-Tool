@@ -51,7 +51,7 @@ settings = get_settings()
 # =========================================================
 st.set_page_config(
     page_title="Balmer Lawrie Litigation Tool",
-    page_icon="⚖️",
+    page_icon="\u2696\ufe0f",
     layout="wide",
     initial_sidebar_state="expanded",
 )
@@ -175,9 +175,8 @@ LITIGATION_COLUMNS = [
     "remarks",
 ]
 
-# Employee master fields — matched exactly to employee_master_template.xlsx
-# (Employee ID, Employee Name, Email ID, Division) plus Role and Is Active,
-# which already existed in the app's login/permission logic.
+# Core employee fields that already existed in the app + additional
+# employee master fields requested for richer employee profiles.
 EMPLOYEE_COLUMNS = [
     "employee_id",
     "employee_name",
@@ -262,50 +261,106 @@ def normalize_bool(value: Any, default: bool = True) -> bool:
     return default
 
 
-def send_email(to_address: str, subject: str, html_body: str) -> bool:
+def send_email(to_address: str, subject: str, html_body: str, cc_addresses: list[str] | None = None) -> bool:
     if not to_address or not settings.SMTP_USER or not settings.SMTP_APP_PASSWORD:
         return False
     try:
+        recipients = [to_address]
+        clean_cc = []
+        if cc_addresses:
+            clean_cc = [str(addr).strip() for addr in cc_addresses if addr and str(addr).strip()]
+            for addr in clean_cc:
+                if addr not in recipients:
+                    recipients.append(addr)
+
         msg = MIMEMultipart("alternative")
         msg["Subject"] = subject
-        msg["From"] = settings.SMTP_USER
+        msg["From"] = f"BL Indirect Tax Update <{settings.SMTP_USER}>"
+        msg["Reply-To"] = "saha.r@balmerlawrie.com"
         msg["To"] = to_address
+        if clean_cc:
+            msg["Cc"] = ", ".join(clean_cc)
         msg.attach(MIMEText(html_body, "html"))
+
         with smtplib.SMTP(settings.SMTP_HOST, settings.SMTP_PORT, timeout=20) as server:
             server.starttls()
             server.login(settings.SMTP_USER, settings.SMTP_APP_PASSWORD)
-            server.sendmail(settings.SMTP_USER, [to_address], msg.as_string())
+            server.sendmail(settings.SMTP_USER, recipients, msg.as_string())
         return True
     except Exception:
         return False
 
-
 def notify_admin(action_type: str, table_name: str, target_id: str, details: dict | None = None) -> None:
     actor_name = st.session_state.get("employee_name", "Unknown User")
     actor_id = st.session_state.get("employee_id", "Unknown ID")
-    actor_email = st.session_state.get("email", "No email")
-    subject = f"Litigation Tool Update: {action_type} on {table_name}"
-    detail_html = ""
+    actor_email = st.session_state.get("email", "")
+    admin_email = "saha.r@balmerlawrie.com"
+    subject = "BL Indirect Tax Updates"
+
+    action_title = sanitize(action_type).replace("_", " ").title()
+    detail_rows = ""
     if details:
-        rows = "".join(
-            f"<tr><td style='padding:6px 10px;border:1px solid #ddd;'><b>{k}</b></td>"
-            f"<td style='padding:6px 10px;border:1px solid #ddd;'>{v}</td></tr>"
+        detail_rows = "".join(
+            f"""
+            <tr>
+                <td style='padding:12px 16px;border-bottom:1px solid #e2e8f0;color:#334155;font-weight:700;background:#f8fafc;width:38%;'>{sanitize(k).replace('_', ' ').title()}</td>
+                <td style='padding:12px 16px;border-bottom:1px solid #e2e8f0;color:#0f172a;background:#ffffff;'>{sanitize(v)}</td>
+            </tr>
+            """
             for k, v in details.items()
         )
-        detail_html = f"<table style='border-collapse:collapse;margin-top:10px;'>{rows}</table>"
+    else:
+        detail_rows = """
+        <tr>
+            <td style='padding:12px 16px;border-bottom:1px solid #e2e8f0;color:#334155;font-weight:700;background:#f8fafc;'>Update</td>
+            <td style='padding:12px 16px;border-bottom:1px solid #e2e8f0;color:#0f172a;background:#ffffff;'>A modification has been recorded successfully.</td>
+        </tr>
+        """
+
     html = f"""
-    <div style="font-family:Arial,sans-serif;">
-        <h3>Balmer Lawrie Litigation Tool - Modification Alert</h3>
-        <p><b>Action:</b> {action_type}</p>
-        <p><b>Table:</b> {table_name}</p>
-        <p><b>Target ID:</b> {target_id}</p>
-        <p><b>Modified by:</b> {actor_name} ({actor_id})</p>
-        <p><b>User Email:</b> {actor_email}</p>
-        {detail_html}
+    <div style="margin:0;padding:32px 18px;background:linear-gradient(135deg,#eff6ff 0%,#f8fafc 45%,#fff7ed 100%);font-family:Segoe UI,Arial,sans-serif;">
+        <div style="max-width:780px;margin:0 auto;background:#ffffff;border-radius:24px;overflow:hidden;border:1px solid #dbeafe;box-shadow:0 20px 60px rgba(15,23,42,0.10);">
+            <div style="padding:30px 34px;background:linear-gradient(135deg,#1d4ed8 0%,#0284c7 45%,#7c3aed 100%);color:#ffffff;">
+                <div style="font-size:12px;font-weight:800;letter-spacing:1.4px;text-transform:uppercase;opacity:0.92;">Balmer Lawrie</div>
+                <h1 style="margin:10px 0 8px 0;font-size:30px;line-height:1.2;font-weight:800;">BL Indirect Tax Updates</h1>
+                <p style="margin:0;font-size:15px;line-height:1.7;opacity:0.96;">This is an automated notification for a completed change in the litigation management application.</p>
+            </div>
+
+            <div style="padding:30px 34px;">
+                <div style="padding:20px 22px;border-radius:18px;background:linear-gradient(135deg,#eff6ff 0%,#fdf4ff 100%);border:1px solid #dbeafe;margin-bottom:22px;">
+                    <div style="font-size:13px;font-weight:700;letter-spacing:0.6px;text-transform:uppercase;color:#64748b;">Modification Summary</div>
+                    <div style="margin-top:8px;font-size:24px;font-weight:800;color:#0f172a;">{action_title}</div>
+                    <div style="margin-top:8px;font-size:14px;color:#475569;line-height:1.7;">Only the necessary modification details are shown below.</div>
+                </div>
+
+                <table style="width:100%;border-collapse:separate;border-spacing:0;border:1px solid #e2e8f0;border-radius:18px;overflow:hidden;margin-bottom:22px;">
+                    <tr>
+                        <td style='padding:12px 16px;border-bottom:1px solid #e2e8f0;color:#334155;font-weight:700;background:#f8fafc;width:38%;'>Module</td>
+                        <td style='padding:12px 16px;border-bottom:1px solid #e2e8f0;color:#0f172a;background:#ffffff;'>{sanitize(table_name).replace('_', ' ').title()}</td>
+                    </tr>
+                    <tr>
+                        <td style='padding:12px 16px;border-bottom:1px solid #e2e8f0;color:#334155;font-weight:700;background:#f8fafc;'>Reference ID</td>
+                        <td style='padding:12px 16px;border-bottom:1px solid #e2e8f0;color:#0f172a;background:#ffffff;'>{sanitize(target_id)}</td>
+                    </tr>
+                    <tr>
+                        <td style='padding:12px 16px;color:#334155;font-weight:700;background:#f8fafc;'>Updated By</td>
+                        <td style='padding:12px 16px;color:#0f172a;background:#ffffff;'>{sanitize(actor_name)} ({sanitize(actor_id)})</td>
+                    </tr>
+                </table>
+
+                <div style="font-size:17px;font-weight:800;color:#0f172a;margin:0 0 12px 0;">Modification Details</div>
+                <table style="width:100%;border-collapse:separate;border-spacing:0;border:1px solid #e2e8f0;border-radius:18px;overflow:hidden;">{detail_rows}</table>
+
+                <div style="margin-top:24px;padding:16px 18px;border-radius:16px;background:#fffaf0;border:1px solid #fde68a;color:#7c2d12;font-size:13px;line-height:1.7;">
+                    This email is an automated update from the BL Indirect Tax application. It contains only the necessary information related to the recent modification.
+                </div>
+            </div>
+        </div>
     </div>
     """
-    send_email(settings.ADMIN_EMAIL, subject, html)
 
+    cc_list = [actor_email] if actor_email and actor_email.lower() != admin_email.lower() else []
+    send_email(admin_email, subject, html, cc_addresses=cc_list)
 
 def login(employee_id: str, password: str) -> tuple[bool, str]:
     employee_id = employee_id.strip()
@@ -517,7 +572,7 @@ def can_delete_document(doc_row: dict) -> bool:
 
 
 # ---------------------------------------------------------
-# EMPLOYEE MASTER HELPERS
+# EMPLOYEE MASTER HELPERS (NEW)
 # ---------------------------------------------------------
 def safe_employee_records_from_df(df: pd.DataFrame) -> list[dict]:
     """Normalize an uploaded employee Excel sheet into clean employee dict rows."""
@@ -526,7 +581,7 @@ def safe_employee_records_from_df(df: pd.DataFrame) -> list[dict]:
     df = df.copy()
     df.columns = [str(c).strip() for c in df.columns]
 
-    # Friendly header aliases -> internal column names (matches employee_master_template.xlsx)
+    # Friendly header aliases -> internal column names
     alias_map = {
         "Employee ID": "employee_id",
         "Employee Name": "employee_name",
@@ -563,7 +618,7 @@ def safe_employee_records_from_df(df: pd.DataFrame) -> list[dict]:
 
 
 def import_employee_file(uploaded_file, default_password: str = "Welcome@123") -> tuple[bool, str]:
-    """Bulk-add / update employees from an Excel file matching employee_master_template.xlsx."""
+    """Bulk-add / update employees (with all additional detail fields) from an Excel file."""
     try:
         df = pd.read_excel(uploaded_file)
         records = safe_employee_records_from_df(df)
@@ -612,7 +667,7 @@ def import_employee_file(uploaded_file, default_password: str = "Welcome@123") -
 
 
 def add_employee_manual(payload: dict, default_password: str = "Welcome@123") -> tuple[bool, str]:
-    """Add one new employee via the manual admin form."""
+    """Add one new employee (with additional detail fields) via the manual admin form."""
     try:
         emp_id = sanitize(payload.get("employee_id"))
         if not emp_id:
@@ -636,7 +691,7 @@ def add_employee_manual(payload: dict, default_password: str = "Welcome@123") ->
 
 
 def update_employee_manual(employee_id: str, payload: dict) -> tuple[bool, str]:
-    """Update details of an existing employee via the manual admin form."""
+    """Update additional/basic details of an existing employee via the manual admin form."""
     try:
         clean_payload = {k: normalize_value(v) for k, v in payload.items()}
         if "is_active" in clean_payload:
@@ -664,11 +719,11 @@ def render_login_page() -> None:
             """
             <div class="feature-card">
                 <h2>Updated secure workflow.</h2>
-                <p>This version adds employee master management for admin.</p>
+                <p>This version adds richer employee master management for admin.</p>
                 <div class="feature-item">Footer credit line is displayed at the bottom of the app.</div>
                 <div class="feature-item">Uploaded documents can be downloaded from the app.</div>
                 <div class="feature-item">Admin can add employees manually or via Excel upload.</div>
-                <div class="feature-item">Admin can edit employee details anytime.</div>
+                <div class="feature-item">Admin can edit additional employee details anytime.</div>
             </div>
             """,
             unsafe_allow_html=True,
@@ -1066,7 +1121,7 @@ def render_admin() -> None:
         render_footer()
         return
 
-    render_hero("Admin Control", "Manage employee master and audit visibility.")
+    render_hero("Admin Control", "Manage employee master (including additional details) and audit visibility.")
     tab1, tab2 = st.tabs(["Employees", "Audit Logs"])
 
     with tab1:
@@ -1084,7 +1139,7 @@ def render_admin() -> None:
 
         # ---- Add Employee (manual) ----
         with emp_tabs[1]:
-            st.caption("Add a new employee.")
+            st.caption("Add a new employee along with additional profile details.")
             with st.form("add_employee_form"):
                 c1, c2, c3 = st.columns(3)
                 new_employee_id = c1.text_input("Employee ID *")
