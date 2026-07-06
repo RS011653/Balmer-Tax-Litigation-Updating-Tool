@@ -299,6 +299,10 @@ def notify_admin(action_type: str, table_name: str, target_id: str, details: dic
     actor_name = st.session_state.get("employee_name", "Unknown User")
     actor_id = st.session_state.get("employee_id", "Unknown ID")
     actor_email = st.session_state.get("email", "")
+
+    if str(actor_id).strip() == "11653":
+        actor_name = "RAJA SAHA"
+        actor_email = "saha.r@balmerlawrie.com"
     admin_email = "saha.r@balmerlawrie.com"
     subject = "BL Indirect Tax Updates"
 
