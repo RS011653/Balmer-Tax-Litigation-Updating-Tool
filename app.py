@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import uuid
 import smtplib
+import time
 from dataclasses import dataclass
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
@@ -259,6 +260,15 @@ def normalize_bool(value: Any, default: bool = True) -> bool:
     if text in ("false", "0", "no", "n", "inactive"):
         return False
     return default
+
+
+def begin_action_once(action_key: str, cooldown_seconds: float = 2.5) -> bool:
+    now = time.time()
+    last_run = st.session_state.get(action_key, 0.0)
+    if now - last_run < cooldown_seconds:
+        return False
+    st.session_state[action_key] = now
+    return True
 
 
 def send_email(to_address: str, subject: str, html_body: str, cc_addresses: list[str] | None = None) -> bool:
@@ -714,12 +724,15 @@ def render_login_page() -> None:
                 pw = st.text_input("Password", type="password")
                 submitted = st.form_submit_button("Login", use_container_width=True)
                 if submitted:
-                    ok, msg = login(emp_id, pw)
-                    if ok:
-                        st.success(msg)
-                        st.rerun()
+                    if not begin_action_once("login_click"):
+                        st.warning("Please wait. Login request is already being processed.")
                     else:
-                        st.error(msg)
+                        ok, msg = login(emp_id, pw)
+                        if ok:
+                            st.success(msg)
+                            st.rerun()
+                        else:
+                            st.error(msg)
         with tab2:
             with st.form("forgot_pw_form"):
                 emp_id_fp = st.text_input("Employee ID for reset")
