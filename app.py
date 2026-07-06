@@ -298,6 +298,7 @@ def send_email(to_address: str, subject: str, html_body: str, cc_addresses: list
 def notify_admin(action_type: str, table_name: str, target_id: str, details: dict | None = None) -> None:
     actor_name = st.session_state.get("employee_name", "Unknown User")
     actor_id = st.session_state.get("employee_id", "Unknown ID")
+    actor_email = st.session_state.get("email", "")
     admin_email = settings.ADMIN_EMAIL or "saha.r@balmerlawrie.com"
     subject = "BL Indirect Tax Updates"
 
