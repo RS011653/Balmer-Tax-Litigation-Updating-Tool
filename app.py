@@ -793,7 +793,7 @@ def render_litigation() -> None:
     )
     df = get_case_dataframe()
 
-    tab_names = ["Browse / Edit", "Add Record", "Import Excel", "Supporting Papers"]
+    tab_names = ["Browse / Edit", "Add Record"]
     if is_admin():
         tab_names.append("Admin Delete")
     tabs = st.tabs(tab_names)
@@ -858,7 +858,7 @@ def render_litigation() -> None:
                             sync_to_google_sheet(payload)
                             save_audit("update", "litigation_master", selected_row["id"], payload)
                             notify_admin("update", "litigation_master", str(selected_row["id"]), payload)
-                            st.success("Litigation record updated successfully.")
+                            st.success("Updating of Records Successfully.")
                             st.rerun()
 
     with tabs[1]:
@@ -908,72 +908,11 @@ def render_litigation() -> None:
                     sync_to_google_sheet(payload)
                     save_audit("insert", "litigation_master", payload["case_ref"], payload)
                     notify_admin("insert", "litigation_master", payload["case_ref"], payload)
-                    st.success("Litigation record saved.")
+                    st.success("A New Record Added Successfully.")
                     st.rerun()
 
-    with tabs[2]:
-        upl = st.file_uploader("Upload litigation Excel", type=["xlsx", "xls"])
-        if upl is not None:
-            if st.button("Import Litigation File", use_container_width=True):
-                if not begin_action_once("import_litigation_click", cooldown_seconds=4.0):
-                    st.warning("Import already in progress, please wait.")
-                else:
-                    ok, msg = import_litigation_file(upl)
-                    if ok:
-                        st.success(msg)
-                        st.rerun()
-                    else:
-                        st.error(msg)
-        st.caption("Excel dates are converted to YYYY-MM-DD before Supabase insert.")
-
-    with tabs[3]:
-        if df.empty:
-            st.info("No litigation cases available for supporting paper upload.")
-        else:
-            attach_options = [case_label(row) for _, row in df.iterrows()]
-            attach_label = st.selectbox("Select case for supporting papers", attach_options, key="attach_case")
-            attach_row = df[df.apply(lambda x: case_label(x) == attach_label, axis=1)].iloc[0].to_dict()
-
-            upload_file = st.file_uploader("Upload supporting paper", key="supporting_paper_upload")
-            if st.button("Upload Supporting Paper", use_container_width=True):
-                if not begin_action_once("upload_paper_click", cooldown_seconds=3.0):
-                    st.warning("Upload already in progress, please wait.")
-                else:
-                    ok, msg = upload_supporting_document(attach_row["id"], upload_file)
-                    if ok:
-                        st.success(msg)
-                        st.rerun()
-                    else:
-                        st.error(msg)
-
-            docs = fetch_table("documents", {"case_id": attach_row["id"]})
-            st.markdown("#### Existing supporting papers")
-            if docs.empty:
-                st.info("No supporting papers uploaded for this case.")
-            else:
-                docs = docs.copy()
-                docs["download_link"] = docs["storage_path"].apply(get_download_link_from_storage)
-                for _, doc in docs.iterrows():
-                    st.markdown(f"**{doc.get('file_name')}**")
-                    c1, c2, c3, c4 = st.columns([3, 2, 3, 2])
-                    c1.write(f"Uploaded by: {doc.get('uploaded_by')}")
-                    c2.write(f"Size: {doc.get('file_size')}")
-                    download_link = doc.get("download_link")
-                    if download_link:
-                        c3.markdown(f"[Download File]({download_link})")
-                    else:
-                        c3.write("Download link unavailable")
-                    if can_delete_document(doc.to_dict()):
-                        if c4.button("Delete File", key=f"delete_doc_{doc.get('id')}"):
-                            ok, msg = delete_document(doc.to_dict())
-                            if ok:
-                                st.success(msg)
-                                st.rerun()
-                            else:
-                                st.error(msg)
-
     if is_admin():
-        with tabs[4]:
+        with tabs[2]:
             if df.empty:
                 st.info("No cases available for delete.")
             else:
@@ -1024,14 +963,21 @@ def render_documents() -> None:
     selected = st.selectbox("Select case", list(case_map.keys()))
     case_id = case_map[selected]
 
-    file = st.file_uploader("Upload attachment", key="documents_upload_page")
+    if "documents_uploader_key" not in st.session_state:
+        st.session_state["documents_uploader_key"] = 0
+
+    file = st.file_uploader(
+        "Upload attachment",
+        key=f"documents_upload_page_{st.session_state['documents_uploader_key']}",
+    )
     if st.button("Upload Document", use_container_width=True):
         if not begin_action_once("upload_doc_page_click", cooldown_seconds=3.0):
             st.warning("Upload already in progress, please wait.")
         else:
             ok, msg = upload_supporting_document(case_id, file)
             if ok:
-                st.success(msg)
+                st.session_state["documents_uploader_key"] += 1
+                st.success("Adding New Attachments Successful.")
                 st.rerun()
             else:
                 st.error(msg)
@@ -1055,7 +1001,7 @@ def render_documents() -> None:
                 if c4.button("Delete File", key=f"documents_page_delete_{doc.get('id')}"):
                     ok, msg = delete_document(doc.to_dict())
                     if ok:
-                        st.success(msg)
+                        st.success("Deletion attachments Successfully.")
                         st.rerun()
                     else:
                         st.error(msg)
