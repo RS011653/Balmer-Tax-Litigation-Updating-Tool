@@ -125,6 +125,23 @@ st.markdown(
         text-align: center; color: #334155; font-size: 0.95rem; margin-top: 30px;
         padding-top: 14px; border-top: 1px solid rgba(148,163,184,0.30); font-weight: 600;
     }
+    .sidebar-flash {
+        margin: 12px 0 0 0; padding: 14px 14px; border-radius: 16px; font-weight: 700;
+        border: 1px solid rgba(255,255,255,0.35); box-shadow: 0 12px 28px rgba(15,23,42,0.12);
+        font-size: 0.92rem; line-height: 1.45;
+    }
+    .sidebar-flash.success {
+        background: linear-gradient(135deg, #dcfce7 0%, #bbf7d0 100%); color: #166534;
+        border-color: rgba(22,101,52,0.18);
+    }
+    .sidebar-flash.error {
+        background: linear-gradient(135deg, #fee2e2 0%, #fecaca 100%); color: #991b1b;
+        border-color: rgba(153,27,27,0.18);
+    }
+    .sidebar-flash.warning {
+        background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%); color: #92400e;
+        border-color: rgba(146,64,14,0.18);
+    }
     </style>
     """,
     unsafe_allow_html=True,
@@ -796,6 +813,7 @@ def render_sidebar() -> str:
         if st.button("Logout", use_container_width=True):
             logout()
             st.rerun()
+        render_flash_message()
         return choice
 
 
@@ -841,10 +859,7 @@ def render_litigation() -> None:
     )
     df = get_case_dataframe()
 
-    tab_names = ["Browse / Edit", "Add Record"]
-    if is_admin():
-        tab_names.append("Admin Delete")
-    tabs = st.tabs(tab_names)
+    tabs = st.tabs(["Browse / Edit", "Add Record"])
 
     with tabs[0]:
         if df.empty:
@@ -961,42 +976,49 @@ def render_litigation() -> None:
                     set_flash("A New Record Added Successfully.")
                     st.rerun()
 
-    if is_admin():
-        with tabs[2]:
-            if df.empty:
-                st.info("No cases available for delete.")
-            else:
-                delete_options = [case_label(row) for _, row in df.iterrows()]
-                single_delete_label = st.selectbox("Delete single case", delete_options, key="single_delete_case")
-                if st.button("Delete Selected Case", use_container_width=True):
-                    if not begin_action_once("delete_single_click", cooldown_seconds=3.0):
-                        st.warning("Please wait, delete already in progress.")
-                    else:
-                        single_row = df[df.apply(lambda x: case_label(x) == single_delete_label, axis=1)].iloc[0].to_dict()
-                        sb.table("litigation_master").delete().eq("id", single_row["id"]).execute()
-                        save_audit("delete", "litigation_master", single_row["id"])
-                        notify_admin("delete", "litigation_master", str(single_row["id"]), {"case_ref": single_row.get("case_ref")})
-                        st.success("Selected case deleted.")
-                        st.rerun()
-
-                multi_delete_labels = st.multiselect("Delete multiple cases", delete_options)
-                if st.button("Delete Multiple Cases", use_container_width=True):
-                    if not begin_action_once("delete_multi_click", cooldown_seconds=3.0):
-                        st.warning("Please wait, bulk delete already in progress.")
-                    else:
-                        ids_to_delete = []
-                        for lbl in multi_delete_labels:
-                            row = df[df.apply(lambda x: case_label(x) == lbl, axis=1)].iloc[0].to_dict()
-                            ids_to_delete.append(row["id"])
-                        if not ids_to_delete:
-                            st.warning("Please select cases for bulk delete.")
+        if is_admin():
+            st.markdown("---")
+            with st.expander("Admin Delete Case", expanded=False):
+                if df.empty:
+                    st.info("No cases available for delete.")
+                else:
+                    delete_options = [case_label(row) for _, row in df.iterrows()]
+                    single_delete_label = st.selectbox("Delete single case", delete_options, key="single_delete_case")
+                    if st.button("Delete Selected Case", use_container_width=True):
+                        if not begin_action_once("delete_single_click", cooldown_seconds=3.0):
+                            st.warning("Please wait, delete already in progress.")
                         else:
-                            for cid in ids_to_delete:
-                                sb.table("litigation_master").delete().eq("id", cid).execute()
-                            save_audit("bulk_delete", "litigation_master", ",".join(map(str, ids_to_delete)), {"count": len(ids_to_delete)})
-                            notify_admin("bulk_delete", "litigation_master", ",".join(map(str, ids_to_delete)), {"count": len(ids_to_delete)})
-                            st.success(f"Deleted {len(ids_to_delete)} cases.")
+                            single_row = df[df.apply(lambda x: case_label(x) == single_delete_label, axis=1)].iloc[0].to_dict()
+                            sb.table("litigation_master").delete().eq("id", single_row["id"]).execute()
+                            save_audit("delete", "litigation_master", single_row["id"])
+                            owner_email, owner_name = get_employee_contact(single_row.get("employee_id"))
+                            notify_admin("delete", "litigation_master", str(single_row["id"]), {"case_ref": single_row.get("case_ref")}, owner_email, owner_name)
+                            set_flash("Selected case deleted successfully.")
                             st.rerun()
+
+                    multi_delete_labels = st.multiselect("Delete multiple cases", delete_options)
+                    if st.button("Delete Multiple Cases", use_container_width=True):
+                        if not begin_action_once("delete_multi_click", cooldown_seconds=3.0):
+                            st.warning("Please wait, bulk delete already in progress.")
+                        else:
+                            ids_to_delete = []
+                            employee_contacts = []
+                            for lbl in multi_delete_labels:
+                                row = df[df.apply(lambda x: case_label(x) == lbl, axis=1)].iloc[0].to_dict()
+                                ids_to_delete.append(row["id"])
+                                employee_contacts.append((row.get("employee_id"), row.get("case_ref")))
+                            if not ids_to_delete:
+                                st.warning("Please select cases for bulk delete.")
+                            else:
+                                for cid in ids_to_delete:
+                                    sb.table("litigation_master").delete().eq("id", cid).execute()
+                                save_audit("bulk_delete", "litigation_master", ",".join(map(str, ids_to_delete)), {"count": len(ids_to_delete)})
+                                notify_admin("bulk_delete", "litigation_master", ",".join(map(str, ids_to_delete)), {"count": len(ids_to_delete)})
+                                for emp_id, case_ref in employee_contacts:
+                                    owner_email, owner_name = get_employee_contact(emp_id)
+                                    notify_admin("delete", "litigation_master", str(case_ref), {"case_ref": case_ref}, owner_email, owner_name)
+                                set_flash(f"Deleted {len(ids_to_delete)} cases successfully.")
+                                st.rerun()
 
     render_footer()
 
@@ -1160,8 +1182,6 @@ def main() -> None:
     if not is_authenticated():
         render_login_page()
         return
-
-    render_flash_message()
 
     choice = render_sidebar()
     if choice == "Dashboard":
