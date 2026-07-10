@@ -163,6 +163,23 @@ def render_footer() -> None:
     )
 
 
+def set_flash(message: str, msg_type: str = "success") -> None:
+    st.session_state["flash_message"] = message
+    st.session_state["flash_message_type"] = msg_type
+
+
+def render_flash_message() -> None:
+    msg = st.session_state.pop("flash_message", None)
+    msg_type = st.session_state.pop("flash_message_type", "success")
+    if msg:
+        if msg_type == "success":
+            st.success(msg)
+        elif msg_type == "error":
+            st.error(msg)
+        elif msg_type == "warning":
+            st.warning(msg)
+
+
 def hash_password(plain: str) -> str:
     return bcrypt.hashpw(plain.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
 
@@ -272,7 +289,14 @@ def send_email(to_address: str, subject: str, html_body: str, cc_addresses: list
         return False
 
 
-def notify_admin(action_type: str, table_name: str, target_id: str, details: dict | None = None) -> None:
+def notify_admin(
+    action_type: str,
+    table_name: str,
+    target_id: str,
+    details: dict | None = None,
+    employee_email: str | None = None,
+    employee_name: str | None = None,
+) -> None:
     actor_name = st.session_state.get("employee_name", "Unknown User")
     actor_id = st.session_state.get("employee_id", "Unknown ID")
     actor_email = st.session_state.get("email", "")
@@ -291,31 +315,42 @@ def notify_admin(action_type: str, table_name: str, target_id: str, details: dic
             for k, v in details.items()
         )
 
-    html = f"""
-    <div style="margin:0;padding:24px;background:linear-gradient(135deg,#eef4ff 0%,#fdf2f8 50%,#fff7ed 100%);font-family:Arial,sans-serif;">
-      <div style="max-width:760px;margin:0 auto;background:#ffffff;border-radius:22px;overflow:hidden;border:1px solid #dbe7ff;">
-        <div style="padding:24px 28px;background:linear-gradient(135deg,#2563eb 0%,#0ea5e9 45%,#d946ef 100%);color:#ffffff;">
-          <h2 style="margin:8px 0 0 0;font-size:24px;">BL Indirect Tax Updates</h2>
-          <p style="margin:8px 0 0 0;font-size:14px;opacity:0.9;">An activity update has been recorded.</p>
-        </div>
-        <div style="padding:26px 28px;">
-          <p><b>Action:</b> {action_type} &nbsp; | &nbsp; <b>Table:</b> {table_name} &nbsp; | &nbsp; <b>Target ID:</b> {target_id}</p>
-          <table style="width:100%;border-collapse:collapse;margin:0 0 18px 0;">
-            <tr><td style="padding:10px 14px;border:1px solid #dbe7ff;font-weight:700;color:#1e3a8a;background:#f8fbff">Modified By</td>
-                <td style="padding:10px 14px;border:1px solid #dbe7ff;color:#0f172a;background:#ffffff">{actor_name} ({actor_id})</td></tr>
-            <tr><td style="padding:10px 14px;border:1px solid #dbe7ff;font-weight:700;color:#1e3a8a;background:#f8fbff">Employee Email</td>
-                <td style="padding:10px 14px;border:1px solid #dbe7ff;color:#0f172a;background:#ffffff">{actor_email or 'Not available'}</td></tr>
-          </table>
-          <table style="width:100%;border-collapse:collapse;">{detail_rows}</table>
-          <div style="margin-top:22px;padding:16px 18px;border-radius:16px;background:#eff6ff;color:#334155;font-size:14px;">
-            This is an automated alert from the Balmer Lawrie Indirect Tax Litigation Updating Tool.
+    def build_html(recipient_note: str) -> str:
+        return f"""
+        <div style="margin:0;padding:24px;background:linear-gradient(135deg,#eef4ff 0%,#fdf2f8 50%,#fff7ed 100%);font-family:Arial,sans-serif;">
+          <div style="max-width:760px;margin:0 auto;background:#ffffff;border-radius:22px;overflow:hidden;border:1px solid #dbe7ff;">
+            <div style="padding:24px 28px;background:linear-gradient(135deg,#2563eb 0%,#0ea5e9 45%,#d946ef 100%);color:#ffffff;">
+              <h2 style="margin:8px 0 0 0;font-size:24px;">BL Indirect Tax Updates</h2>
+              <p style="margin:8px 0 0 0;font-size:14px;opacity:0.9;">{recipient_note}</p>
+            </div>
+            <div style="padding:26px 28px;">
+              <p><b>Action:</b> {action_type} &nbsp; | &nbsp; <b>Table:</b> {table_name} &nbsp; | &nbsp; <b>Target ID:</b> {target_id}</p>
+              <table style="width:100%;border-collapse:collapse;margin:0 0 18px 0;">
+                <tr><td style="padding:10px 14px;border:1px solid #dbe7ff;font-weight:700;color:#1e3a8a;background:#f8fbff">Modified By</td>
+                    <td style="padding:10px 14px;border:1px solid #dbe7ff;color:#0f172a;background:#ffffff">{actor_name} ({actor_id})</td></tr>
+                <tr><td style="padding:10px 14px;border:1px solid #dbe7ff;font-weight:700;color:#1e3a8a;background:#f8fbff">Actor Email</td>
+                    <td style="padding:10px 14px;border:1px solid #dbe7ff;color:#0f172a;background:#ffffff">{actor_email or 'Not available'}</td></tr>
+              </table>
+              <table style="width:100%;border-collapse:collapse;">{detail_rows}</table>
+              <div style="margin-top:22px;padding:16px 18px;border-radius:16px;background:#eff6ff;color:#334155;font-size:14px;">
+                This is an automated alert from the Balmer Lawrie Indirect Tax Litigation Updating Tool.
+              </div>
+            </div>
           </div>
         </div>
-      </div>
-    </div>
-    """
-    cc_list = [actor_email] if actor_email and actor_email.lower() != admin_email.lower() else None
-    send_email(admin_email, subject, html, cc_addresses=cc_list)
+        """
+
+    send_email(admin_email, subject, build_html("An activity update has been recorded."))
+
+    if employee_email and employee_email.strip():
+        target_email_lc = employee_email.strip().lower()
+        admin_email_lc = admin_email.strip().lower() if admin_email else ""
+        actor_email_lc = actor_email.strip().lower() if actor_email else ""
+        if target_email_lc not in (admin_email_lc, actor_email_lc):
+            employee_html = build_html(
+                f"Dear {employee_name or 'Employee'}, your litigation record has been updated by {actor_name}."
+            )
+            send_email(employee_email, f"{subject} - Your Case Was Updated", employee_html)
 
 
 def sync_to_google_sheet(row: dict) -> None:
@@ -402,6 +437,19 @@ def fetch_table(table_name: str, filters: dict | None = None) -> pd.DataFrame:
         if value not in (None, ""):
             query = query.eq(key, value)
     return pd.DataFrame(query.execute().data or [])
+
+
+def get_employee_contact(employee_id: Any) -> tuple[str | None, str | None]:
+    if employee_id in (None, ""):
+        return None, None
+    try:
+        res = sb.table("employees").select("employee_name,email").eq("employee_id", str(employee_id)).execute()
+        if res.data:
+            row = res.data[0]
+            return row.get("email"), row.get("employee_name")
+    except Exception:
+        pass
+    return None, None
 
 
 def save_audit(action_type: str, target_table: str, target_id: str, details: dict | None = None) -> None:
@@ -857,8 +905,9 @@ def render_litigation() -> None:
                             payload["employee_email"] = st.session_state.get("email", "")
                             sync_to_google_sheet(payload)
                             save_audit("update", "litigation_master", selected_row["id"], payload)
-                            notify_admin("update", "litigation_master", str(selected_row["id"]), payload)
-                            st.success("Updating of Records Successfully.")
+                            owner_email, owner_name = get_employee_contact(payload.get("employee_id"))
+                            notify_admin("update", "litigation_master", str(selected_row["id"]), payload, owner_email, owner_name)
+                            set_flash("Updating of Records Successfully.")
                             st.rerun()
 
     with tabs[1]:
@@ -907,8 +956,9 @@ def render_litigation() -> None:
                     payload["employee_email"] = st.session_state.get("email", "")
                     sync_to_google_sheet(payload)
                     save_audit("insert", "litigation_master", payload["case_ref"], payload)
-                    notify_admin("insert", "litigation_master", payload["case_ref"], payload)
-                    st.success("A New Record Added Successfully.")
+                    owner_email, owner_name = get_employee_contact(payload.get("employee_id"))
+                    notify_admin("insert", "litigation_master", payload["case_ref"], payload, owner_email, owner_name)
+                    set_flash("A New Record Added Successfully.")
                     st.rerun()
 
     if is_admin():
@@ -976,8 +1026,11 @@ def render_documents() -> None:
         else:
             ok, msg = upload_supporting_document(case_id, file)
             if ok:
+                case_row = df[df["id"] == case_id].iloc[0].to_dict() if not df.empty else {}
+                owner_email, owner_name = get_employee_contact(case_row.get("employee_id"))
+                notify_admin("upload", "documents", str(case_id), {"case_id": case_id, "file_name": getattr(file, "name", "")}, owner_email, owner_name)
                 st.session_state["documents_uploader_key"] += 1
-                st.success("Adding New Attachments Successful.")
+                set_flash("Adding New Attachments Successful.")
                 st.rerun()
             else:
                 st.error(msg)
@@ -1001,7 +1054,10 @@ def render_documents() -> None:
                 if c4.button("Delete File", key=f"documents_page_delete_{doc.get('id')}"):
                     ok, msg = delete_document(doc.to_dict())
                     if ok:
-                        st.success("Deletion attachments Successfully.")
+                        case_row = df[df["id"] == case_id].iloc[0].to_dict() if not df.empty else {}
+                        owner_email, owner_name = get_employee_contact(case_row.get("employee_id"))
+                        notify_admin("delete_document", "documents", str(doc.get("id")), {"case_id": case_id, "file_name": doc.get("file_name")}, owner_email, owner_name)
+                        set_flash("Deletion attachments Successfully.")
                         st.rerun()
                     else:
                         st.error(msg)
@@ -1104,6 +1160,8 @@ def main() -> None:
     if not is_authenticated():
         render_login_page()
         return
+
+    render_flash_message()
 
     choice = render_sidebar()
     if choice == "Dashboard":
