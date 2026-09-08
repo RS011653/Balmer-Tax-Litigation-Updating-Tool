@@ -162,7 +162,8 @@ sb = get_supabase()
 # =========================================================
 LITIGATION_COLUMNS = [
     "division_name", "employee_id", "person_name", "tax_type",
-    "disputed_demand", "financial_year", "disputed_forum",
+    "disputed_demand", "tax_demand", "interest", "penalty",
+    "financial_year", "disputed_forum",
     "last_hearing_date", "next_hearing_date", "current_status", "remarks",
 ]
 
@@ -381,6 +382,9 @@ def sync_to_google_sheet(row: dict) -> None:
             "person_name": row.get("person_name"),
             "tax_type": row.get("tax_type"),
             "disputed_demand": row.get("disputed_demand"),
+            "tax_demand": row.get("tax_demand"),
+            "interest": row.get("interest"),
+            "penalty": row.get("penalty"),
             "financial_year": row.get("financial_year"),
             "disputed_forum": row.get("disputed_forum"),
             "last_hearing_date": row.get("last_hearing_date"),
@@ -493,13 +497,36 @@ def case_label(row: pd.Series) -> str:
     return f"{row.get('id')} | {row.get('case_ref')} | {row.get('person_name')} | {row.get('tax_type')}"
 
 
+def order_display_columns(df: pd.DataFrame) -> pd.DataFrame:
+    """Reorder columns for display so Tax Demand / Interest / Penalty always sit
+    right after Disputed Demand, regardless of the raw column order returned
+    by Supabase. Any columns not explicitly listed are appended at the end,
+    and any listed columns missing from the dataframe are simply skipped."""
+    if df.empty:
+        return df
+    preferred_order = [
+        "id", "case_ref", "division_name", "employee_id", "person_name", "tax_type",
+        "disputed_demand", "tax_demand", "interest", "penalty",
+        "financial_year", "disputed_forum",
+        "last_hearing_date", "next_hearing_date", "current_status", "remarks",
+    ]
+    ordered = [c for c in preferred_order if c in df.columns]
+    remaining = [c for c in df.columns if c not in ordered]
+    return df[ordered + remaining]
+
+
 def safe_records_from_df(df: pd.DataFrame) -> list[dict]:
     if df.empty:
         return []
     df = df.copy()
     df.columns = [str(c).strip() for c in df.columns]
-    if "Employee ID" in df.columns:
-        df = df.rename(columns={"Employee ID": "employee_id"})
+    litigation_alias_map = {
+        "Employee ID": "employee_id",
+        "Tax Demand": "tax_demand",
+        "Interest": "interest",
+        "Penalty": "penalty",
+    }
+    df = df.rename(columns={k: v for k, v in litigation_alias_map.items() if k in df.columns})
     for col in LITIGATION_COLUMNS:
         if col not in df.columns:
             df[col] = None
@@ -848,7 +875,7 @@ def render_dashboard() -> None:
         fig2.update_layout(plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)")
         st.plotly_chart(fig2, use_container_width=True)
 
-    st.dataframe(df, use_container_width=True, hide_index=True)
+    st.dataframe(order_display_columns(df), use_container_width=True, hide_index=True)
     render_footer()
 
 
@@ -870,7 +897,7 @@ def render_litigation() -> None:
             if q:
                 mask = work.astype(str).apply(lambda c: c.str.contains(q, case=False, na=False))
                 work = work[mask.any(axis=1)]
-            st.dataframe(work, use_container_width=True, hide_index=True)
+            st.dataframe(order_display_columns(work), use_container_width=True, hide_index=True)
 
             editable_options = [case_label(row) for _, row in work.iterrows()]
             if editable_options:
@@ -888,6 +915,11 @@ def render_litigation() -> None:
                     tax_type = d1.text_input("Tax Type", value=selected_row.get("tax_type") or "")
                     disputed_demand = d2.text_input("Disputed Demand", value=selected_row.get("disputed_demand") or "")
                     financial_year = d3.text_input("Financial Year", value=selected_row.get("financial_year") or "")
+
+                    g1, g2, g3 = st.columns(3)
+                    tax_demand = g1.text_input("Tax Demand", value=selected_row.get("tax_demand") or "")
+                    interest = g2.text_input("Interest", value=selected_row.get("interest") or "")
+                    penalty = g3.text_input("Penalty", value=selected_row.get("penalty") or "")
 
                     e1, e2, e3 = st.columns(3)
                     disputed_forum = e1.text_input("Disputed Forum", value=selected_row.get("disputed_forum") or "")
@@ -908,6 +940,9 @@ def render_litigation() -> None:
                                 "person_name": sanitize(person_name) or None,
                                 "tax_type": sanitize(tax_type) or None,
                                 "disputed_demand": sanitize(disputed_demand) or None,
+                                "tax_demand": sanitize(tax_demand) or None,
+                                "interest": sanitize(interest) or None,
+                                "penalty": sanitize(penalty) or None,
                                 "financial_year": sanitize(financial_year) or None,
                                 "disputed_forum": sanitize(disputed_forum) or None,
                                 "last_hearing_date": normalize_date_string(last_hearing_date),
@@ -915,15 +950,23 @@ def render_litigation() -> None:
                                 "current_status": sanitize(current_status) or "In Progress",
                                 "remarks": sanitize(remarks) or None,
                             }
-                            sb.table("litigation_master").update(payload).eq("id", selected_row["id"]).execute()
-                            payload["case_ref"] = selected_row.get("case_ref")
-                            payload["employee_email"] = st.session_state.get("email", "")
-                            sync_to_google_sheet(payload)
-                            save_audit("update", "litigation_master", selected_row["id"], payload)
-                            owner_email, owner_name = get_employee_contact(payload.get("employee_id"))
-                            notify_admin("update", "litigation_master", str(selected_row["id"]), payload, owner_email, owner_name)
-                            set_flash("Updating of Records Successfully.")
-                            st.rerun()
+                            try:
+                                sb.table("litigation_master").update(payload).eq("id", selected_row["id"]).execute()
+                            except Exception as exc:
+                                st.error(
+                                    f"Update failed: {exc}\n\nIf this mentions 'tax_demand', 'interest' or "
+                                    f"'penalty', these columns must first be added to the litigation_master "
+                                    f"table in Supabase (ALTER TABLE ... ADD COLUMN)."
+                                )
+                            else:
+                                payload["case_ref"] = selected_row.get("case_ref")
+                                payload["employee_email"] = st.session_state.get("email", "")
+                                sync_to_google_sheet(payload)
+                                save_audit("update", "litigation_master", selected_row["id"], payload)
+                                owner_email, owner_name = get_employee_contact(payload.get("employee_id"))
+                                notify_admin("update", "litigation_master", str(selected_row["id"]), payload, owner_email, owner_name)
+                                set_flash("Updating of Records Successfully.")
+                                st.rerun()
 
     with tabs[1]:
         with st.form("add_litigation_form"):
@@ -939,6 +982,11 @@ def render_litigation() -> None:
             tax_type = d1.text_input("Tax Type")
             disputed_demand = d2.text_input("Disputed Demand")
             financial_year = d3.text_input("Financial Year")
+
+            g1, g2, g3 = st.columns(3)
+            tax_demand = g1.text_input("Tax Demand")
+            interest = g2.text_input("Interest")
+            penalty = g3.text_input("Penalty")
 
             e1, e2, e3 = st.columns(3)
             disputed_forum = e1.text_input("Disputed Forum")
@@ -960,6 +1008,9 @@ def render_litigation() -> None:
                         "person_name": sanitize(person_name) or None,
                         "tax_type": sanitize(tax_type) or None,
                         "disputed_demand": sanitize(disputed_demand) or None,
+                        "tax_demand": sanitize(tax_demand) or None,
+                        "interest": sanitize(interest) or None,
+                        "penalty": sanitize(penalty) or None,
                         "financial_year": sanitize(financial_year) or None,
                         "disputed_forum": sanitize(disputed_forum) or None,
                         "last_hearing_date": normalize_date_string(last_hearing_date),
@@ -967,14 +1018,22 @@ def render_litigation() -> None:
                         "current_status": sanitize(current_status) or "In Progress",
                         "remarks": sanitize(remarks) or None,
                     }
-                    sb.table("litigation_master").insert(payload).execute()
-                    payload["employee_email"] = st.session_state.get("email", "")
-                    sync_to_google_sheet(payload)
-                    save_audit("insert", "litigation_master", payload["case_ref"], payload)
-                    owner_email, owner_name = get_employee_contact(payload.get("employee_id"))
-                    notify_admin("insert", "litigation_master", payload["case_ref"], payload, owner_email, owner_name)
-                    set_flash("A New Record Added Successfully.")
-                    st.rerun()
+                    try:
+                        sb.table("litigation_master").insert(payload).execute()
+                    except Exception as exc:
+                        st.error(
+                            f"Save failed: {exc}\n\nIf this mentions 'tax_demand', 'interest' or "
+                            f"'penalty', these columns must first be added to the litigation_master "
+                            f"table in Supabase (ALTER TABLE ... ADD COLUMN)."
+                        )
+                    else:
+                        payload["employee_email"] = st.session_state.get("email", "")
+                        sync_to_google_sheet(payload)
+                        save_audit("insert", "litigation_master", payload["case_ref"], payload)
+                        owner_email, owner_name = get_employee_contact(payload.get("employee_id"))
+                        notify_admin("insert", "litigation_master", payload["case_ref"], payload, owner_email, owner_name)
+                        set_flash("A New Record Added Successfully.")
+                        st.rerun()
 
         if is_admin():
             st.markdown("---")
